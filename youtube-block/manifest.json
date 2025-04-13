@@ -1,0 +1,17 @@
+{
+    "manifest_version": 3,
+    "name": "YouTube Ad Refresh",
+    "version": "1.0",
+    "description": "Detect YouTube ads and refresh the page",
+    "permissions": ["activeTab", "scripting"],
+    "action": {
+        "default_title": "YouTube Ad Refresh"
+    },
+    "content_scripts": [
+        {
+            "matches": ["*://www.youtube.com/*"],
+            "js": ["content.js"]
+        }
+    ]
+}
+    
