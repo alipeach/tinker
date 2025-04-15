@@ -12,14 +12,33 @@
             display: grid;
             grid-template-columns: repeat(2, 1fr);
             gap: 1rem;
+            width: 100%;
+            min-height: 400px;
             max-height: 400px;
             overflow-y: auto;
+            /* 添加内边距，防止滚动条遮挡勾选框 */
+            padding-right: 10px; 
+        }
+
+        .image-wrapper {
+            position: relative;
         }
 
         .image-container img {
             width: 100%;
             height: auto;
             object-fit: cover;
+        }
+
+        .image-placeholder {
+            border: 1px dashed #ccc;
+            aspect-ratio: 200 / 300;
+        }
+
+        .checkbox {
+            position: absolute;
+            top: 5px;
+            right: 5px;
         }
 
         .layout {
@@ -34,31 +53,47 @@
         .right {
             flex: 1;
         }
+
+        .model-item {
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            border: 1px solid #ccc;
+            border-radius: 0.25rem;
+            margin-right: 0.5rem;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        .model-item.selected {
+            background-color: #3b82f6;
+            color: white;
+        }
     </style>
     <script>
         let selectedFiles = [];
-        let currentImageIndex = 0;
+        let currentCheckedIndex = -1; // 初始化为 -1 表示没有选中任何图片
+        let selectedModel = 'YOLO11n';
 
         async function loadImagesOnSelect() {
             const files = document.getElementById('images').files;
             selectedFiles = [];
             for (let i = 0; i < files.length; i++) {
-                selectedFiles.push(files[i]);
+                if (files[i].type.match('image.*')) {
+                    selectedFiles.push(files[i]);
+                }
             }
-            selectedFiles = selectedFiles.slice(0, 4);
-            currentImageIndex = 0;
-            updateImageDisplay();
+            currentCheckedIndex = -1;
+            await updateImageDisplay();
         }
 
         async function detect() {
-            if (selectedFiles.length === 0) {
+            if (currentCheckedIndex === -1) {
                 alert('未选择图片');
                 return;
             }
-            const model = document.getElementById('model').value;
             const formData = new FormData();
-            formData.append('model', model);
-            formData.append('image', selectedFiles[currentImageIndex]);
+            formData.append('model', selectedModel);
+            formData.append('image', selectedFiles[currentCheckedIndex]);
             const response = await fetch('/detect', {
                 method: 'POST',
                 body: formData
@@ -71,23 +106,95 @@
         async function updateImageDisplay() {
             const imageContainer = document.getElementById('image-container');
             imageContainer.innerHTML = '';
-            selectedFiles.forEach((file, index) => {
-                const reader = new FileReader();
-                reader.onload = function (e) {
-                    const img = document.createElement('img');
-                    img.src = e.target.result;
-                    img.addEventListener('click', () => {
-                        currentImageIndex = index;
-                        updateImageDisplay();
+            if (selectedFiles.length === 0) {
+                for (let i = 0; i < 4; i++) {
+                    const wrapper = document.createElement('div');
+                    wrapper.classList.add('image-wrapper');
+
+                    const placeholder = document.createElement('div');
+                    placeholder.classList.add('image-placeholder');
+
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.classList.add('checkbox');
+                    checkbox.addEventListener('change', () => {
+                        handleCheckboxChange(i);
                     });
-                    if (index === currentImageIndex) {
-                        img.classList.add('border', 'border-blue-500', 'border-4');
+                    if (i === currentCheckedIndex) {
+                        checkbox.checked = true;
                     }
-                    imageContainer.appendChild(img);
-                };
-                reader.readAsDataURL(file);
+
+                    wrapper.appendChild(placeholder);
+                    wrapper.appendChild(checkbox);
+                    imageContainer.appendChild(wrapper);
+                }
+            } else {
+                const promises = selectedFiles.map((file) => {
+                    return new Promise((resolve) => {
+                        const reader = new FileReader();
+                        reader.onload = function (e) {
+                            resolve(e.target.result);
+                        };
+                        reader.readAsDataURL(file);
+                    });
+                });
+
+                const imageDataUrls = await Promise.all(promises);
+
+                imageDataUrls.forEach((dataUrl, index) => {
+                    const wrapper = document.createElement('div');
+                    wrapper.classList.add('image-wrapper');
+
+                    const img = document.createElement('img');
+                    img.src = dataUrl;
+
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.classList.add('checkbox');
+                    checkbox.addEventListener('change', () => {
+                        handleCheckboxChange(index);
+                    });
+                    if (index === currentCheckedIndex) {
+                        checkbox.checked = true;
+                    }
+
+                    wrapper.appendChild(img);
+                    wrapper.appendChild(checkbox);
+                    imageContainer.appendChild(wrapper);
+                });
+            }
+        }
+
+        function handleCheckboxChange(index) {
+            const checkboxes = document.querySelectorAll('.checkbox');
+            if (currentCheckedIndex === index) {
+                currentCheckedIndex = -1; // 取消选中
+                checkboxes[index].checked = false;
+            } else {
+                if (currentCheckedIndex!== -1) {
+                    checkboxes[currentCheckedIndex].checked = false;
+                }
+                currentCheckedIndex = index; // 选中当前图片
+                checkboxes[index].checked = true;
+            }
+        }
+
+        function selectModel(model) {
+            selectedModel = model;
+            const modelItems = document.querySelectorAll('.model-item');
+            modelItems.forEach(item => {
+                item.classList.remove('selected');
+                if (item.dataset.model === model) {
+                    item.classList.add('selected');
+                }
             });
         }
+
+        // 页面加载时调用更新函数
+        window.onload = function () {
+            updateImageDisplay();
+            selectModel('YOLO11n');
+        };
     </script>
 </head>
 
@@ -98,21 +205,21 @@
             <div class="left bg-white shadow-md rounded p-8">
                 <form enctype="multipart/form-data" class="mb-4">
                     <div class="mb-4">
-                        <label class="block text-gray-700 text-sm font-bold mb-2" for="images">选择图片</label>
                         <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            id="images" type="file" multiple onchange="loadImagesOnSelect()">
+                            id="images" type="file" multiple accept="image/*" onchange="loadImagesOnSelect()">
                     </div>
                 </form>
                 <div class="image-container" id="image-container"></div>
                 <div class="flex justify-between items-center mt-4">
                     <div>
-                        <label class="block text-gray-700 text-sm font-bold mb-2" for="model">选择模型</label>
-                        <select class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                            id="model">
+                        <label class="block text-gray-700 text-sm font-bold mb-2">检测模型</label>
+                        <div>
                             {% for model in models %}
-                            <option value="{{ model }}" {% if model == 'YOLO11n' %}selected{% endif %}>{{ model }}</option>
+                            <div class="model-item" data-model="{{ model }}" onclick="selectModel('{{ model }}')">
+                                {{ model }}
+                            </div>
                             {% endfor %}
-                        </select>
+                        </div>
                     </div>
                     <button class="bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
                         type="button" onclick="detect()">检测</button>
@@ -126,4 +233,4 @@
     </div>
 </body>
 
-</html>
+</html>  
