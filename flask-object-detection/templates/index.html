@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>目标检测界面</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" rel="stylesheet">
+    <style>
+        .image-container {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1rem;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .image-container img {
+            width: 100%;
+            height: auto;
+            object-fit: cover;
+        }
+
+        .layout {
+            display: flex;
+            gap: 2rem;
+        }
+
+        .left {
+            flex: 1;
+        }
+
+        .right {
+            flex: 1;
+        }
+    </style>
+    <script>
+        let selectedFiles = [];
+        let currentImageIndex = 0;
+
+        async function loadImagesOnSelect() {
+            const files = document.getElementById('images').files;
+            selectedFiles = [];
+            for (let i = 0; i < files.length; i++) {
+                selectedFiles.push(files[i]);
+            }
+            selectedFiles = selectedFiles.slice(0, 4);
+            currentImageIndex = 0;
+            updateImageDisplay();
+        }
+
+        async function detect() {
+            if (selectedFiles.length === 0) {
+                alert('未选择图片');
+                return;
+            }
+            const model = document.getElementById('model').value;
+            const formData = new FormData();
+            formData.append('model', model);
+            formData.append('image', selectedFiles[currentImageIndex]);
+            const response = await fetch('/detect', {
+                method: 'POST',
+                body: formData
+            });
+            const blob = await response.blob();
+            const imgUrl = URL.createObjectURL(blob);
+            document.getElementById('result-image').src = imgUrl;
+        }
+
+        async function updateImageDisplay() {
+            const imageContainer = document.getElementById('image-container');
+            imageContainer.innerHTML = '';
+            selectedFiles.forEach((file, index) => {
+                const reader = new FileReader();
+                reader.onload = function (e) {
+                    const img = document.createElement('img');
+                    img.src = e.target.result;
+                    img.addEventListener('click', () => {
+                        currentImageIndex = index;
+                        updateImageDisplay();
+                    });
+                    if (index === currentImageIndex) {
+                        img.classList.add('border', 'border-blue-500', 'border-4');
+                    }
+                    imageContainer.appendChild(img);
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+    </script>
+</head>
+
+<body class="bg-gray-100 font-sans">
+    <div class="container mx-auto p-8">
+        <h1 class="text-3xl font-bold mb-4">目标检测界面</h1>
+        <div class="layout">
+            <div class="left bg-white shadow-md rounded p-8">
+                <form enctype="multipart/form-data" class="mb-4">
+                    <div class="mb-4">
+                        <label class="block text-gray-700 text-sm font-bold mb-2" for="images">选择图片</label>
+                        <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            id="images" type="file" multiple onchange="loadImagesOnSelect()">
+                    </div>
+                </form>
+                <div class="image-container" id="image-container"></div>
+                <div class="flex justify-between items-center mt-4">
+                    <div>
+                        <label class="block text-gray-700 text-sm font-bold mb-2" for="model">选择模型</label>
+                        <select class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            id="model">
+                            {% for model in models %}
+                            <option value="{{ model }}" {% if model == 'YOLO11n' %}selected{% endif %}>{{ model }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <button class="bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
+                        type="button" onclick="detect()">检测</button>
+                </div>
+            </div>
+            <div class="right bg-white shadow-md rounded p-8">
+                <h2 class="text-xl font-bold mb-2">检测结果</h2>
+                <img id="result-image" src="" class="w-full h-auto">
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>

@@ -7,7 +7,8 @@ function checkForAds() {
 
     const sponsorAdButton = document.querySelector('.ytp-ad-overlay-close-button');
     const skipButton = document.querySelector('.ytp-ad-skip-button');
-    if (sponsorAdButton || skipButton) {
+    const adPlayerOverlay = document.querySelector('.ytp-ad-player-overlay-layout');
+    if (sponsorAdButton || skipButton || adPlayerOverlay) {
         location.replace(location.href);
     }
 }
