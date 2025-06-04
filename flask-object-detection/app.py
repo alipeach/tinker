@@ -10,7 +10,9 @@ app = Flask(__name__)
 
 models = {
     'YOLO11n': '/Users/apple/Work/models-yolo11/yolo11n.pt',
-    'YOLO11s': '/Users/apple/Work/models-yolo11/yolo11s.pt'
+    'YOLO11s': '/Users/apple/Work/models-yolo11/yolo11s.pt',
+    'YOLO11m': '/Users/apple/Work/models-yolo11/yolo11m.pt',
+    'YOLO11x': '/Users/apple/Work/models-yolo11/yolo11x.pt'
 }
 current_model = YOLO(models['YOLO11n'])
 
