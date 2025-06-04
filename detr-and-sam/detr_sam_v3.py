@@ -18,19 +18,18 @@ def get_beijing_time():
     return beijing_time
 
 
-def save_detection_result(frame_count, result, batch_dir):
+def convert_to_yolo_format(boxes, img_width, img_height, class_ids):
     """
-    保存每一帧的检测结果到本地
+    将检测结果转换为YOLO标注格式
     """
-    frame_result = {
-        "frame_count": frame_count,
-        "class_ids": result.boxes.cls.int().tolist() if result.boxes.cls.numel() > 0 else [],
-        "boxes": result.boxes.xyxy.cpu().numpy().tolist() if result.boxes.xyxy.numel() > 0 else [],
-        "confidences": result.boxes.conf.cpu().numpy().tolist() if result.boxes.conf.numel() > 0 else []
-    }
-    frame_result_path = batch_dir / "detection_results" / f"{frame_count:06d}_detection_result.json"
-    with open(frame_result_path, 'w') as f:
-        json.dump(frame_result, f)
+    yolo_lines = []
+    for i, box in enumerate(boxes):
+        x_center = (box[0] + box[2]) / (2 * img_width)
+        y_center = (box[1] + box[3]) / (2 * img_height)
+        width = (box[2] - box[0]) / img_width
+        height = (box[3] - box[1]) / img_height
+        yolo_lines.append(f"{class_ids[i]} {x_center} {y_center} {width} {height}")
+    return yolo_lines
 
 
 def split_and_detect(
@@ -49,12 +48,10 @@ def split_and_detect(
     拆帧并进行目标检测
     """
     # 创建不同的子目录
-    raw_frames_dir = batch_dir / "raw_frames"
-    raw_frames_dir.mkdir(exist_ok=True)
-    detection_results_dir = batch_dir / "detection_results"
-    detection_results_dir.mkdir(exist_ok=True)
-    detection_rendered_dir = batch_dir / "detection_rendered"
-    detection_rendered_dir.mkdir(exist_ok=True)
+    images_dir = batch_dir / "images"
+    images_dir.mkdir(exist_ok=True)
+    labels_dir = batch_dir / "labels"
+    labels_dir.mkdir(exist_ok=True)
 
     # 处理视频文件，拆帧保存原始文件
     cap = cv2.VideoCapture(str(data))
@@ -75,12 +72,8 @@ def split_and_detect(
 
         frame_count += 1
 
-        # 注释掉图像清晰度提升的代码
-        # kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
-        # sharpened_frame = cv2.filter2D(frame, -1, kernel)
-
         # 保存原始帧
-        raw_frame_path = raw_frames_dir / f"{frame_count:06d}.jpg"
+        raw_frame_path = images_dir / f"{frame_count:06d}.jpg"
         cv2.imwrite(str(raw_frame_path), frame)
 
     cap.release()
@@ -90,8 +83,9 @@ def split_and_detect(
         if frame_num % 100 == 0:
             print(f"当前检测进度：已检测 {frame_num} 帧，共 {max_split_frames} 帧。")
 
-        raw_frame_path = raw_frames_dir / f"{frame_num:06d}.jpg"
+        raw_frame_path = images_dir / f"{frame_num:06d}.jpg"
         frame = cv2.imread(str(raw_frame_path))
+        img_height, img_width = frame.shape[:2]
 
         # 使用 detect 方法进行目标检测，关闭日志输出
         result = det_model(frame, device=device, conf=conf, iou=iou, imgsz=imgsz, max_det=max_det, classes=classes, verbose=False)[0]
@@ -99,34 +93,45 @@ def split_and_detect(
         confidences = result.boxes.conf.cpu().numpy().tolist() if result.boxes.conf.numel() > 0 else []
 
         if class_ids:
-            boxes = result.boxes.xyxy  # Boxes object for bbox outputs
-            # 这里可以添加简单的画框逻辑，仅为了保存检测结果可视化
-            for i, box in enumerate(boxes):
-                box = box.cpu().numpy().astype(int)
-                cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), (0, 255, 0), 2)
-                # 加上分类ID以及置信度
-                text = f"Class: {class_ids[i]}, Conf: {confidences[i]:.2f}"
-                cv2.putText(frame, text, (box[0], box[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+            boxes = result.boxes.xyxy.cpu().numpy().tolist()
 
-        # 保存检测结果渲染后的文件
-        detection_rendered_path = detection_rendered_dir / f"{frame_num:06d}.jpg"
-        cv2.imwrite(str(detection_rendered_path), frame)
-
-        # 保存每一帧的检测结果文本
-        frame_text_output_path = detection_results_dir / f"{frame_num:06d}_detection.txt"
-        with open(frame_text_output_path, 'w') as f:
-            if class_ids:
-                for i in range(len(class_ids)):
-                    box = result.boxes.xyxy[i].cpu().numpy().astype(int)
-                    conf_score = result.boxes.conf[i].cpu().numpy()
-                    f.write(f"Class: {class_ids[i]}, Box: {box}, Confidence: {conf_score}\n")
-            else:
-                f.write("No detections\n")
-
-        # 保存检测结果到本地
-        save_detection_result(frame_num, result, batch_dir)
+            # 保存检测结果到YOLO标注格式
+            yolo_lines = convert_to_yolo_format(boxes, img_width, img_height, class_ids)
+            label_path = labels_dir / f"{frame_num:06d}.txt"
+            with open(label_path, 'w') as f:
+                f.write('\n'.join(yolo_lines))
+        else:
+            # 没有检测结果，保存为空文件
+            label_path = labels_dir / f"{frame_num:06d}.txt"
+            with open(label_path, 'w') as f:
+                pass
 
     return frame_count
+
+
+def convert_yolo_to_boxes(yolo_lines, img_width, img_height):
+    """
+    将YOLO标注格式转换为边界框坐标
+    """
+    boxes = []
+    class_ids = []
+    for line in yolo_lines:
+        parts = line.strip().split()
+        class_id = int(parts[0])
+        x_center = float(parts[1])
+        y_center = float(parts[2])
+        width = float(parts[3])
+        height = float(parts[4])
+
+        x1 = (x_center - width / 2) * img_width
+        y1 = (y_center - height / 2) * img_height
+        x2 = (x_center + width / 2) * img_width
+        y2 = (y_center + height / 2) * img_height
+
+        boxes.append([x1, y1, x2, y2])
+        class_ids.append(class_id)
+    return boxes, class_ids
+
 
 def segment_frames(
     data: Union[str, Path],
@@ -154,59 +159,64 @@ def segment_frames(
     else:
         num_sam_frames = min(num_sam_frames, max_split_frames)
 
-    raw_frames_dir = batch_dir / "raw_frames"
-    detection_results_dir = batch_dir / "detection_results"
+    images_dir = batch_dir / "images"
+    labels_dir = batch_dir / "labels"
 
     empty_frames = []
     for frame_num in range(1, num_sam_frames + 1):
         if frame_num % 100 == 0:
             print(f"当前分割进度：已处理 {frame_num} 帧，共 {num_sam_frames} 帧。")
 
-        raw_frame_path = raw_frames_dir / f"{frame_num:06d}.jpg"
+        raw_frame_path = images_dir / f"{frame_num:06d}.jpg"
         frame = cv2.imread(str(raw_frame_path))
+        img_height, img_width = frame.shape[:2]
 
         # 从本地加载检测结果
-        frame_result_path = detection_results_dir / f"{frame_num:06d}_detection_result.json"
-        with open(frame_result_path, 'r') as f:
-            frame_result = json.load(f)
-        class_ids = frame_result["class_ids"]
-        confidences = frame_result["confidences"]
+        label_path = labels_dir / f"{frame_num:06d}.txt"
+        with open(label_path, 'r') as f:
+            yolo_lines = f.readlines()
 
+        boxes, class_ids = convert_yolo_to_boxes(yolo_lines, img_width, img_height)
+        confidences = [1.0] * len(class_ids)  # 假设置信度为1.0
 
         # 如果当前帧无检测结果，取前后5帧中有结果的一帧
         if not class_ids:
-            for offset in range(1, 5):
+            for offset in range(1, 30):
                 prev_frame_num = frame_num - offset
                 next_frame_num = frame_num + offset
                 prev_result = None
                 next_result = None
 
                 if prev_frame_num > 0:
-                    prev_result_path = detection_results_dir / f"{prev_frame_num:06d}_detection_result.json"
-                    with open(prev_result_path, 'r') as f:
-                        prev_result = json.load(f)
+                    prev_label_path = labels_dir / f"{prev_frame_num:06d}.txt"
+                    with open(prev_label_path, 'r') as f:
+                        prev_yolo_lines = f.readlines()
+                        prev_boxes, prev_class_ids = convert_yolo_to_boxes(prev_yolo_lines, img_width, img_height)
+                        if prev_class_ids:
+                            prev_result = {"boxes": prev_boxes, "class_ids": prev_class_ids}
                 if next_frame_num <= max_split_frames:
-                    next_result_path = detection_results_dir / f"{next_frame_num:06d}_detection_result.json"
-                    with open(next_result_path, 'r') as f:
-                        next_result = json.load(f)
+                    next_label_path = labels_dir / f"{next_frame_num:06d}.txt"
+                    with open(next_label_path, 'r') as f:
+                        next_yolo_lines = f.readlines()
+                        next_boxes, next_class_ids = convert_yolo_to_boxes(next_yolo_lines, img_width, img_height)
+                        if next_class_ids:
+                            next_result = {"boxes": next_boxes, "class_ids": next_class_ids}
 
                 if prev_result and prev_result["class_ids"]:
-                    frame_result = prev_result
+                    boxes = prev_result["boxes"]
+                    class_ids = prev_result["class_ids"]
                     break
                 elif next_result and next_result["class_ids"]:
-                    frame_result = next_result
+                    boxes = next_result["boxes"]
+                    class_ids = next_result["class_ids"]
                     break
 
-            class_ids = frame_result["class_ids"]
-            confidences = frame_result["confidences"]
-
-        
         rendered_frame = frame
         if class_ids:
             if empty_frames:
                 print(f"帧 {', '.join(map(str, empty_frames))} 无检测结果")
                 empty_frames = []
-            boxes = np.array(frame_result["boxes"])
+            boxes = np.array(boxes)
             sam_results = sam_model(frame, bboxes=boxes, verbose=False, save=False, device=device)
             segments = sam_results[0].masks.xyn
 
@@ -214,12 +224,23 @@ def segment_frames(
             rendered_frame = frame.copy()
             h, w = rendered_frame.shape[:2]
             overlay = rendered_frame.copy()
-            alpha = 0.3  # 透明度，范围从 0 到 1，值越小越透明
+            alpha = 0.4  # 透明度，范围从 0 到 1，值越小越透明
+
+
+            #紫色
+            # color = (128, 0, 128)
+
+             #紫色-2
+            color=(204,0,153)
+            #绿色
+            # color = (0, 255, 0)
+            #草绿色
+            # color = (124, 252, 0)
 
             for segment in segments:
                 segment = (segment * np.array([w, h])).astype(np.int32)
                 try:
-                    cv2.fillPoly(overlay, [segment], color=(0, 255, 0))
+                    cv2.fillPoly(overlay, [segment], color = color)
                 except cv2.error as e:
                     print(f"异常信息：第 {frame_num} 帧，fillPoly执行异常: {e}")
 
@@ -253,7 +274,8 @@ def auto_annotate(
     classes: Optional[List[int]] = [15],
     output_dir: Optional[Union[str, Path]] = "/workspace/outputs",
     num_sam_frames: int = -1,
-    max_split_frames: int = -1
+    max_split_frames: int = -1,
+    mode: str = "detect_and_segment"
 ) -> None:
     """
     Automatically annotate a video using a YOLO object detection model and a SAM segmentation model.
@@ -274,9 +296,10 @@ def auto_annotate(
         output_dir (str | Path | None): Directory to save the annotated results. If None, a default directory is created.
         num_sam_frames (int): Number of frames to process for SAM segmentation after detection. -1 means process all detected frames.
         max_split_frames (int): Maximum number of frames to split. -1 means split all frames.
+        mode (str): Mode of operation. Can be 'detect', 'segment', or 'detect_and_segment'.
     """
     start_time = datetime.now()
-    det_model = YOLO(det_model)
+    det_model = RTDETR(det_model)
     sam_model = SAM(sam_model)
 
     data = Path(data)
@@ -290,13 +313,25 @@ def auto_annotate(
     batch_dir = output_dir / batch_dir_name
     batch_dir.mkdir(exist_ok=True, parents=True)
 
-    # 拆帧并检测
-    frame_count = split_and_detect(
-        data, det_model, batch_dir, device, conf, iou, imgsz, max_det, classes, max_split_frames
-    )
+    frame_count = 0
+    if mode in ["detect", "detect_and_segment"]:
+        # 拆帧并检测
+        frame_count = split_and_detect(
+            data, det_model, batch_dir, device, conf, iou, imgsz, max_det, classes, max_split_frames
+        )
 
-    # 分割
-    segment_frames(data, sam_model, batch_dir, device, num_sam_frames, frame_count)
+    if mode in ["segment", "detect_and_segment"]:
+        if frame_count == 0:
+            # 如果只进行分割，需要计算最大帧数
+            cap = cv2.VideoCapture(str(data))
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            if max_split_frames == -1:
+                frame_count = total_frames
+            else:
+                frame_count = min(max_split_frames, total_frames)
+            cap.release()
+        # 分割
+        segment_frames(data, sam_model, batch_dir, device, num_sam_frames, frame_count)
 
     end_time = datetime.now()
     elapsed_time = end_time - start_time
@@ -314,20 +349,33 @@ if __name__ == "__main__":
     # 请根据实际情况修改这些参数
     # data_path = "/workspace/猫岛的猫-5.mp4"
     # output_dir = "/workspace/outputs/猫岛的猫-5"
-    data_path = "/workspace/猫岛的猫-6.mp4"
-    output_dir = "/workspace/outputs/猫岛的猫-6"
-    # det_model_name = "/workspace/model/rtdetr-l.pt"
-    det_model_name = "/workspace/model/yolo11n-cat6-0430-01-100epochs.pt"
-    sam_model_name = "/workspace/model/sam2_l.pt"
+    
+    # data_path = "/workspace/猫岛的猫-6.mp4"
+    # output_dir = "/workspace/outputs/猫岛的猫-6"
+
+    # data_path = "/workspace/西湖的松鼠-01.mp4"
+    # output_dir = "/workspace/outputs/西湖的松鼠-01"
+
+    # data_path = "/workspace/cat-flight.mp4"
+    # output_dir = "/workspace/outputs/cat-flight"
+
+    data_path = "/workspace/white-fox.mp4"
+    output_dir = "/workspace/outputs/white-fox"
+    
+    det_model_name = "/workspace/model/rtdetr-x.pt"
+    sam_model_name = "/workspace/model/sam2_b.pt"
     # conf = 0.20
     # classes = [15,16,21]
 
-    conf = 0.45
-    classes = [0]
+    conf = 0.25
+    classes = [16]
     # 拆帧并检测后，需要进行SAM处理的最大帧数
     num_sam_frames = -1
     # 直接指定最多拆多少帧
     max_split_frames = -1
+    # 选择模式：'detect', 'segment', 'detect_and_segment'
+    mode = 'detect_and_segment'
 
     auto_annotate(data=data_path, det_model=det_model_name, sam_model=sam_model_name, output_dir=output_dir,
-                  conf=conf, classes=classes, num_sam_frames=num_sam_frames, max_split_frames=max_split_frames)
+                  conf=conf, classes=classes, num_sam_frames=num_sam_frames, max_split_frames=max_split_frames, mode=mode)
+    
