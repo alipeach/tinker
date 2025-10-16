@@ -1,7 +1,7 @@
 import os
 from moviepy.editor import ImageClip, concatenate_videoclips
 
-def images_to_video(image_paths, output_path, total_duration=3, fps=24):
+def images_to_video(image_paths, output_path, total_duration=3, fps=30):
     """
     将多张照片合成指定时长的视频
     
@@ -28,6 +28,13 @@ def images_to_video(image_paths, output_path, total_duration=3, fps=24):
     
     # 合并所有片段
     final_clip = concatenate_videoclips(clips, method="compose")
+
+    # 获取视频尺寸
+    width, height = final_clip.size
+
+    # 如果高度是奇数，调整高度
+    if height % 2 != 0:
+        height = height - 1
     
     # 写入视频文件（H.264编码，MP4格式）
     final_clip.write_videofile(
@@ -41,16 +48,16 @@ def images_to_video(image_paths, output_path, total_duration=3, fps=24):
 if __name__ == "__main__":
     # 替换为你的照片路径（需3张）
     image_list = [
-        "photo1.jpg",
-        "photo2.jpg",
-        "photo3.jpg"
+        "/Users/apple/Downloads/8月19-李云龙三秒_25.jpg",
+        "/Users/apple/Downloads/8月19-李云龙三秒_55.jpg",
+        "/Users/apple/Downloads/8月19-李云龙三秒_80.jpg"
     ]
     
     try:
         images_to_video(
             image_paths=image_list,
-            output_path="merged_video.mp4",
-            total_duration=3,
+            output_path="/Users/apple/Downloads/对口型-李云龙-背景视频.mp4",
+            total_duration=15,
             fps=24
         )
         print("视频生成成功，路径: merged_video.mp4")
