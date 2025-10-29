@@ -294,11 +294,11 @@ def process_video(
 
 if __name__ == "__main__":
     # 配置参数
-    data_path = r"C:\Users\liuzhuo\Workspace\project\1017-chaojia-cat\海边吵架的猫.mp4"
-    output_dir = r"C:\Users\liuzhuo\Workspace\project\1017-chaojia-cat"
+    data_path = r"C:\Users\xxxx\Workspace\project\1017-chaojia-cat\海边吵架的猫.mp4"
+    output_dir = r"C:\Users\xxxx\Workspace\project\1017-chaojia-cat"
     
-    det_model_name = r"C:\Users\liuzhuo\Workspace\model\yolo11x.pt"
-    sam_model_name = r"C:\Users\liuzhuo\Workspace\model\sam2_l.pt"
+    det_model_name = r"C:\Users\xxxx\Workspace\model\yolo11x.pt"
+    sam_model_name = r"C:\Users\xxxx\Workspace\model\sam2_l.pt"
     
     # 检测参数
     conf = 0.45
