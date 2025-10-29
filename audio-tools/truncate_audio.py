@@ -42,6 +42,6 @@ def truncate_audio_files(source, target_dir):
 
 
 # 定义源文件/目录和目标目录
-source = "/Users/apple/Blibli/语音素材/李云龙/李云龙-亮剑-语音"
-target_directory = "/Users/apple/Blibli/语音素材/李云龙/李云龙-亮剑语音-6秒-1023"
+source = "/Users/apple/Blibli/语音素材/李云龙-亮剑视频语音切片"
+target_directory = "/Users/apple/Blibli/语音素材/李云龙-亮剑语音-6秒"
 truncate_audio_files(source, target_directory)
