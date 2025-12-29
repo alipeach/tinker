@@ -1,8 +1,9 @@
 {
     "manifest_version": 3,
     "name": "YouTube Ad Refresh",
-    "version": "1.0",
-    "description": "Detect YouTube ads and refresh the page",
+    "version": "1.1.0",
+    "version_name": "1.1.0 - save/restore playback on ad refresh",
+    "description": "Detect YouTube ads, refresh the page, and resume playback",
     "permissions": ["activeTab", "scripting", "storage"],
     "action": {
         "default_title": "YouTube Ad Refresh"
