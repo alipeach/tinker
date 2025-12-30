@@ -108,6 +108,124 @@ def split_and_detect(
     return frame_count
 
 
+def prefill_by_consistency(
+    labels_dir: Path,
+    frame_num: int,
+    area_ratio_min: float,
+    area_ratio_max: float,
+    center_dist_max: float
+) -> bool:
+    """前后相邻帧框面积与位置接近时，直接用前一帧补齐当前空标注。"""
+    prev_path = labels_dir / f"{frame_num - 1:06d}.txt"
+    next_path = labels_dir / f"{frame_num + 1:06d}.txt"
+    if not (prev_path.exists() and next_path.exists()):
+        return False
+    if prev_path.stat().st_size == 0 or next_path.stat().st_size == 0:
+        return False
+
+    with open(prev_path, 'r') as f_prev, open(next_path, 'r') as f_next:
+        prev_line = f_prev.readline().strip()
+        next_line = f_next.readline().strip()
+    if not prev_line or not next_line:
+        return False
+
+    try:
+        px, py, pw, ph = map(float, prev_line.split()[1:5])
+        nx, ny, nw, nh = map(float, next_line.split()[1:5])
+    except ValueError:
+        return False
+
+    prev_area = pw * ph
+    next_area = nw * nh
+    area_ratio = prev_area / next_area if next_area > 0 else 0
+    center_dist = ((px - nx) ** 2 + (py - ny) ** 2) ** 0.5
+    if area_ratio_min <= area_ratio <= area_ratio_max and center_dist <= center_dist_max:
+        label_path = labels_dir / f"{frame_num:06d}.txt"
+        with open(label_path, 'w') as f_curr:
+            f_curr.write(prev_line + '\n')
+        print(f"一致性补全：帧{frame_num}用前一帧标注补齐（面积比{area_ratio:.2f}，位移{center_dist:.3f}）")
+        return True
+
+    return False
+
+
+def remove_outlier_detections(
+    labels_dir: Path,
+    max_frames: int,
+    jump_thresh: float = 0.1,
+    span_max: float = 0.05
+):
+    """基于中心点跳变剔除异常帧：前后帧稳定但中间帧偏离则清空标注。"""
+    removed_count = 0
+
+    for frame_num in range(2, max_frames):
+        prev_path = labels_dir / f"{frame_num - 1:06d}.txt"
+        curr_path = labels_dir / f"{frame_num:06d}.txt"
+        next_path = labels_dir / f"{frame_num + 1:06d}.txt"
+
+        if not (prev_path.exists() and curr_path.exists() and next_path.exists()):
+            continue
+        if prev_path.stat().st_size == 0 or curr_path.stat().st_size == 0 or next_path.stat().st_size == 0:
+            continue
+
+        with open(prev_path, 'r') as f_prev, open(curr_path, 'r') as f_curr, open(next_path, 'r') as f_next:
+            prev_line = f_prev.readline().strip()
+            curr_line = f_curr.readline().strip()
+            next_line = f_next.readline().strip()
+
+        if not prev_line or not curr_line or not next_line:
+            continue
+
+        try:
+            px, py = map(float, prev_line.split()[1:3])
+            cx, cy = map(float, curr_line.split()[1:3])
+            nx, ny = map(float, next_line.split()[1:3])
+        except ValueError:
+            continue
+
+        d_prev = ((cx - px) ** 2 + (cy - py) ** 2) ** 0.5
+        d_next = ((cx - nx) ** 2 + (cy - ny) ** 2) ** 0.5
+        d_span = ((px - nx) ** 2 + (py - ny) ** 2) ** 0.5
+
+        if d_prev > jump_thresh and d_next > jump_thresh and d_span < span_max:
+            with open(curr_path, 'w') as f_curr:
+                f_curr.write('')
+            removed_count += 1
+            print(f"剔除异常帧：帧{frame_num}中心点跳变（前后稳定）")
+
+    print(f"异常帧清理完成：共剔除{removed_count}帧")
+
+
+def prefill_missing_detections(
+    labels_dir: Path,
+    max_frames: int,
+    area_ratio_min: float = 0.7,
+    area_ratio_max: float = 1.3,
+    center_dist_max: float = 0.05
+):
+    """先做一致性补全：相邻帧框稳定则补齐当前空标注。"""
+    success_count = 0
+    fail_count = 0
+
+    for frame_num in range(1, max_frames + 1):
+        label_path = labels_dir / f"{frame_num:06d}.txt"
+        if label_path.exists() and label_path.stat().st_size > 0:
+            continue
+
+        if prefill_by_consistency(
+            labels_dir,
+            frame_num,
+            area_ratio_min,
+            area_ratio_max,
+            center_dist_max
+        ):
+            success_count += 1
+        else:
+            fail_count += 1
+
+    print(f"一致性补全完成：成功补充{success_count}帧，未补充{fail_count}帧")
+
+
 def fill_missing_detections(labels_dir: Path, max_frames: int):
     """
     处理无检测结果的帧：逐帧检查，仅当空帧的前后五帧均存在有效检测结果时才补充
@@ -115,7 +233,6 @@ def fill_missing_detections(labels_dir: Path, max_frames: int):
     """
     success_count = 0
     fail_count = 0
-
     # 逐帧检查（从1到最大帧数）
     for frame_num in range(1, max_frames + 1):
         label_path = labels_dir / f"{frame_num:06d}.txt"
@@ -271,6 +388,8 @@ def process_video(
 
     # 2. 补充缺失的检测结果（检测后、分割前执行）
     labels_dir = batch_dir / "labels"
+    remove_outlier_detections(labels_dir, frame_count)
+    prefill_missing_detections(labels_dir, frame_count)
     fill_missing_detections(labels_dir, frame_count)
 
     # 3. 执行分割并生成结果视频
